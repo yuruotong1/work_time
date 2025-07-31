@@ -1,104 +1,81 @@
-"""
-File Uploader for Work Time Tracker
-Handles uploading screenshots to Notion
-"""
-
 import os
-import base64
+import json
 import requests
-from typing import List, Optional
+from typing import List, Optional, Dict
 import logging
 
 class FileUploader:
-    """Handles file uploads to Notion"""
+    """Handles file uploads to Notion using the file upload API"""
     
-    def __init__(self, notion_token: str):
+    def __init__(self, notion_token: str, database_id: str = None):
         """Initialize file uploader"""
         self.notion_token = notion_token
+        self.database_id = database_id
         self.logger = logging.getLogger(__name__)
+        self.headers = {
+            "Authorization": f"Bearer {notion_token}",
+            "Notion-Version": "2022-06-28"
+        }
     
-    def upload_file_to_notion(self, file_path: str) -> Optional[str]:
-        """Upload a file to Notion and return the file URL"""
-        try:
-            if not os.path.exists(file_path):
-                self.logger.error(f"File not found: {file_path}")
-                return None
-            
-            # Read file content
-            with open(file_path, 'rb') as file:
-                file_content = file.read()
-            
-            # Encode file content
-            encoded_content = base64.b64encode(file_content).decode('utf-8')
-            
-            # Prepare upload data
-            upload_data = {
-                "parent": {
-                    "type": "database_id",
-                    "database_id": "your_database_id"  # This will be set dynamically
-                },
-                "properties": {
-                    "title": {
-                        "title": [
-                            {
-                                "text": {
-                                    "content": os.path.basename(file_path)
-                                }
-                            }
-                        ]
-                    }
-                },
-                "children": [
-                    {
-                        "object": "block",
-                        "type": "file",
-                        "file": {
-                            "type": "file",
-                            "file": {
-                                "url": f"data:image/png;base64,{encoded_content}",
-                                "expiry_time": "2025-12-31T23:59:59.000Z"
-                            }
-                        }
-                    }
-                ]
+    def create_file_upload(self) -> Optional[str]:
+        """Create a file upload session and return the upload ID"""
+        url = "https://api.notion.com/v1/file_uploads"
+        headers = self.headers | {"Content-Type": "application/json"}
+        payload = {}
+        response = requests.post(url, headers=headers, json=payload)
+        data: Dict = response.json()
+        return data["upload_url"]
+
+
+    def send_file_upload(self, upload_url: str, file_path: str) -> bool:
+        """Send file to the created upload session"""
+        headers = self.headers
+        # Open file in binary mode
+        with open(file_path, "rb") as f:
+            files = {
+                "file": (os.path.basename(file_path), f, "image/png")
             }
-            
-            # Upload to Notion
-            headers = {
-                "Authorization": f"Bearer {self.notion_token}",
-                "Content-Type": "application/json",
-                "Notion-Version": "2022-06-28"
-            }
-            
-            response = requests.post(
-                "https://api.notion.com/v1/pages",
-                headers=headers,
-                json=upload_data
-            )
-            
-            if response.status_code == 200:
+            response = requests.post(upload_url, headers=headers, files=files)
+            print("send file upload response", response.json())
+        return response.json()
+
+    def upload_file_via_url(self, file_url: str, filename: str) -> Optional[Dict]:
+        """Import external file via URL"""
+        url = "https://api.notion.com/v1/file_uploads"
+        headers = self.headers | {"Content-Type": "application/json"}
+        payload = {
+            "mode": "external_url",
+            "external_url": file_url,
+            "filename": filename
+        }
+
+        response = requests.post(url, headers=headers, json=payload)
+
+        self.logger.info(f"Upload file via URL status code: {response.status_code}")
+        
+        if response.status_code == 200:
+            try:
                 result = response.json()
-                file_url = result.get('url')
-                self.logger.info(f"File uploaded successfully: {file_url}")
-                return file_url
-            else:
-                self.logger.error(f"Upload failed: {response.status_code} - {response.text}")
+                self.logger.info("File uploaded via URL successfully")
+                return result
+            except ValueError:
+                self.logger.error("Invalid JSON response")
                 return None
-                
-        except Exception as e:
-            self.logger.error(f"Error uploading file: {e}")
+        else:
+            self.logger.error(f"Failed to upload file via URL: {response.status_code} - {response.text}")
             return None
-    
-    def upload_screenshots(self, screenshot_paths: List[str], database_id: str) -> List[str]:
+
+
+    def upload_file_to_notion(self, file_path: str) -> Optional[str]:
+        """Upload a file to Notion using the file upload API and return the file URL"""
+        upload_url = self.create_file_upload()
+        res = self.send_file_upload(upload_url, file_path)
+        return res["id"]
+
+    def upload_screenshots(self, screenshot_paths: List[str]) -> List[str]:
         """Upload multiple screenshots and return their URLs"""
-        uploaded_urls = []
-        
+        file_ids = []
         for screenshot_path in screenshot_paths:
-            # Update database_id for this upload
-            self.database_id = database_id
-            
-            file_url = self.upload_file_to_notion(screenshot_path)
-            if file_url:
-                uploaded_urls.append(file_url)
-        
-        return uploaded_urls 
+            file_id = self.upload_file_to_notion(screenshot_path)
+            file_ids.append(file_id)
+        return file_ids 

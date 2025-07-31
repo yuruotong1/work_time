@@ -70,7 +70,7 @@ class ScreenshotManager(QThread):
             
             # Generate filename with timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"screenshot_{timestamp}.png"
+            filename = f"{timestamp}.png"
             filepath = os.path.join(self.screenshots_dir, filename)
             
             # Save screenshot

@@ -34,6 +34,25 @@ class TaskLoaderThread(QThread):
         except Exception as e:
             self.error_occurred.emit(str(e))
 
+class TaskUpdateThread(QThread):
+    """Thread for updating task time in Notion"""
+    update_completed = pyqtSignal()
+    error_occurred = pyqtSignal(str)
+    
+    def __init__(self, notion_client: NotionClient, task_id: str, time_spent: int, screenshots: List[str]):
+        super().__init__()
+        self.notion_client = notion_client
+        self.task_id = task_id
+        self.time_spent = time_spent
+        self.screenshots = screenshots
+    
+    def run(self):
+        try:
+            self.notion_client.update_task_time(self.task_id, self.time_spent, self.screenshots)
+            self.update_completed.emit()
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
 class MainWindow(QMainWindow):
     """Main application window"""
     
@@ -256,8 +275,13 @@ class MainWindow(QMainWindow):
     
     def load_tasks(self):
         """Load tasks from Notion"""
-        self.status_label.setText("Loading tasks...")
+        self.status_label.setText("Loading tasks from Notion...")
         self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setText("Loading...")
+        
+        # Show progress bar
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # Indeterminate progress
         
         # Create and start loader thread
         self.loader_thread = TaskLoaderThread(self.notion_client)
@@ -279,12 +303,16 @@ class MainWindow(QMainWindow):
         
         self.status_label.setText(f"Loaded {len(tasks)} tasks")
         self.refresh_btn.setEnabled(True)
+        self.refresh_btn.setText("Refresh Tasks")
+        self.progress_bar.setVisible(False)
         self.log_message(f"Loaded {len(tasks)} tasks from Notion")
     
     def on_tasks_error(self, error: str):
         """Handle task loading error"""
         self.status_label.setText("Error loading tasks")
         self.refresh_btn.setEnabled(True)
+        self.refresh_btn.setText("Refresh Tasks")
+        self.progress_bar.setVisible(False)
         QMessageBox.warning(self, "Error", f"Failed to load tasks: {error}")
         self.log_message(f"Error loading tasks: {error}")
     
@@ -296,28 +324,39 @@ class MainWindow(QMainWindow):
             self.selected_task = task
             info_text = f"任务名称: {task['title']}\n"
             info_text += f"负责人: {task['assignee']}\n"
-            info_text += f"已用时间: {task['time_spent']} 分钟\n"
+            info_text += f"已用时间: {self._format_time_for_display(task['time_spent'])}\n"
             info_text += f"截止日期: {task['due_date']}\n"
-            info_text += f"工资: {task['salary']} 元\n"
             self.task_info.setText(info_text)
             # Enable start button
             self.start_btn.setEnabled(True)
             self.current_task_label.setText(task['title'])
+            
+            # Display total time spent on this task as elapsed time
+            # This ensures Elapsed Time matches the "已用时间" when selecting a task
+            total_minutes = task.get('time_spent', 0)
+            total_seconds = total_minutes * 60
+            formatted_time = self._format_time(total_seconds)
+            self.time_label.setText(formatted_time)
         else:
             self.selected_task = None
             self.start_btn.setEnabled(False)
             self.current_task_label.setText("No task selected")
             self.task_info.clear()
+            self.time_label.setText("00:00:00")
     
     def start_tracking(self):
         """Start time tracking"""
         if not self.selected_task:
             return
         
-        # Start time tracking
+        # Get previous time spent on this task (in minutes)
+        previous_time_minutes = self.selected_task.get('time_spent', 0)
+        
+        # Start time tracking with previous time
         self.time_tracker.start_tracking(
             self.selected_task['id'], 
-            self.selected_task['title']
+            self.selected_task['title'],
+            previous_time_minutes
         )
         
         # Start screenshot capture with default 5-minute interval
@@ -330,6 +369,11 @@ class MainWindow(QMainWindow):
         self.task_list.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # Indeterminate progress
+        
+        # Display initial total time (previous time + 0 seconds current session)
+        # This ensures Elapsed Time matches the "已用时间" when starting
+        total_seconds = previous_time_minutes * 60
+        self.time_label.setText(self._format_time(total_seconds))
         
         self.status_label.setText("Tracking active")
         self.log_message(f"Started tracking: {self.selected_task['title']}")
@@ -345,45 +389,115 @@ class MainWindow(QMainWindow):
         # Stop screenshot capture
         self.screenshot_manager.stop_capture()
         
-        # Update UI
+        # Update UI immediately
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.task_list.setEnabled(True)
-        self.progress_bar.setVisible(False)
         
-        self.status_label.setText("Ready")
+        # Show progress bar for updating Notion
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # Indeterminate progress
+        self.status_label.setText("Updating task in Notion...")
+        
+        # Update time display to show final total time
+        if self.selected_task:
+            # Get updated time from the task (it should have been updated by the time tracker)
+            # This ensures Elapsed Time shows the updated total time after stopping
+            total_minutes = self.selected_task.get('time_spent', 0)
+            total_seconds = total_minutes * 60
+            self.time_label.setText(self._format_time(total_seconds))
+        
         self.log_message("Stopped tracking")
     
     def update_time_display(self, time_str: str):
-        """Update time display"""
+        """Update time display with total time (previous + current session)"""
+        # time_str from TimeTracker already includes previous time + current session
         self.time_label.setText(time_str)
     
     def on_session_completed(self, seconds: int, screenshots: List[str]):
         """Handle session completion"""
-        # Update Notion with time spent
+        # Update the selected task's time_spent to reflect the new total
         if self.selected_task:
-            self.notion_client.update_task_time(
-                self.selected_task['id'], 
-                seconds, 
+            previous_time_minutes = self.selected_task.get('time_spent', 0)
+            new_session_minutes = round(seconds / 60, 2)
+            self.selected_task['time_spent'] = previous_time_minutes + new_session_minutes
+            
+            # Update the time display to show the new total time
+            total_seconds = self.selected_task['time_spent'] * 60
+            self.time_label.setText(self._format_time(total_seconds))
+            
+            # Start background thread to update Notion
+            self.update_thread = TaskUpdateThread(
+                self.notion_client,
+                self.selected_task['id'],
+                seconds,
                 screenshots
             )
+            self.update_thread.update_completed.connect(self.on_update_completed)
+            self.update_thread.error_occurred.connect(self.on_update_error)
+            self.update_thread.start()
         
         # Show completion message
         hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
         total_minutes = round(seconds / 60, 2)
         
-        message = f"Session completed!\n"
-        message += f"Time spent: {hours}h {minutes}m ({total_minutes} minutes)\n"
+        # Format time for display
+        if total_minutes < 1:
+            time_display = f"{seconds} 秒"
+        else:
+            total_minutes_int = int(total_minutes)
+            remaining_seconds = int((total_minutes - total_minutes_int) * 60)
+            
+            if total_minutes_int < 60:
+                if remaining_seconds == 0:
+                    time_display = f"{total_minutes_int} 分钟"
+                else:
+                    time_display = f"{total_minutes_int} 分钟 {remaining_seconds} 秒"
+            else:
+                hours = total_minutes_int // 60
+                remaining_minutes = total_minutes_int % 60
+                if remaining_minutes == 0 and remaining_seconds == 0:
+                    time_display = f"{hours} 小时"
+                elif remaining_seconds == 0:
+                    time_display = f"{hours} 小时 {remaining_minutes} 分钟"
+                else:
+                    time_display = f"{hours} 小时 {remaining_minutes} 分钟 {remaining_seconds} 秒"
+        
+        message = f"work completed!\n"
+        message += f"Time spent: {time_display}\n"
         message += f"Screenshots taken: {len(screenshots)}"
         
         QMessageBox.information(self, "Session Complete", message)
-        self.log_message(f"Session completed: {hours}h {minutes}m ({total_minutes} minutes), {len(screenshots)} screenshots")
+        self.log_message(f"Session completed: {time_display}, {len(screenshots)} screenshots")
     
     def on_screenshot_taken(self, screenshot_path: str):
         """Handle screenshot taken"""
         self.time_tracker.add_screenshot(screenshot_path)
         self.log_message(f"Screenshot saved: {screenshot_path}")
+    
+    def on_update_completed(self):
+        """Handle task update completion"""
+        self.progress_bar.setVisible(False)
+        self.status_label.setText("Ready")
+        self.log_message("Task updated successfully in Notion")
+        
+        # Update the task info display to show the new total time
+        if self.selected_task:
+            info_text = f"任务名称: {self.selected_task['title']}\n"
+            info_text += f"负责人: {self.selected_task['assignee']}\n"
+            info_text += f"已用时间: {self._format_time_for_display(self.selected_task['time_spent'])}\n"
+            info_text += f"截止日期: {self.selected_task['due_date']}\n"
+            self.task_info.setText(info_text)
+        
+        # Refresh tasks list to show updated time
+        self.load_tasks()
+    
+    def on_update_error(self, error: str):
+        """Handle task update error"""
+        self.progress_bar.setVisible(False)
+        self.status_label.setText("Error updating task")
+        QMessageBox.warning(self, "Update Error", f"Failed to update task in Notion: {error}")
+        self.log_message(f"Error updating task: {error}")
     
 
     
@@ -396,6 +510,37 @@ class MainWindow(QMainWindow):
         # Auto-scroll to bottom
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
+    
+    def _format_time(self, seconds: int) -> str:
+        """Format seconds into HH:MM:SS"""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    
+    def _format_time_for_display(self, minutes: float) -> str:
+        """Format time for display - show minutes and seconds without decimals"""
+        if minutes < 1:
+            seconds = int(minutes * 60)
+            return f"{seconds} 秒"
+        else:
+            total_minutes = int(minutes)
+            remaining_seconds = int((minutes - total_minutes) * 60)
+            
+            if total_minutes < 60:
+                if remaining_seconds == 0:
+                    return f"{total_minutes} 分钟"
+                else:
+                    return f"{total_minutes} 分钟 {remaining_seconds} 秒"
+            else:
+                hours = total_minutes // 60
+                remaining_minutes = total_minutes % 60
+                if remaining_minutes == 0 and remaining_seconds == 0:
+                    return f"{hours} 小时"
+                elif remaining_seconds == 0:
+                    return f"{hours} 小时 {remaining_minutes} 分钟"
+                else:
+                    return f"{hours} 小时 {remaining_minutes} 分钟 {remaining_seconds} 秒"
     
     def closeEvent(self, event):
         """Handle application close event"""

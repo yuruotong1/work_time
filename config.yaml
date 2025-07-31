@@ -9,5 +9,4 @@ database:
   time_spent: 工作时间（分钟）
   screenshots: 截屏
   due_date: 截止日期
-  salary: 工资
   

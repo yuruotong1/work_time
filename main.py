@@ -4,7 +4,6 @@ Work Time Tracker - Main Application Entry Point
 """
 
 import sys
-import os
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from src.main_window import MainWindow

@@ -27,7 +27,7 @@ class NotionClient:
         
         self.client = Client(auth=self.token)
         self.logger = logging.getLogger(__name__)
-        self.file_uploader = FileUploader(self.token)
+        self.file_uploader = FileUploader(self.token, self.database_id)
     
     def get_tasks(self) -> List[Dict]:
         """Fetch tasks from Notion database"""
@@ -42,7 +42,6 @@ class NotionClient:
                 task = self._parse_task_page(page)
                 if task:
                     tasks.append(task)
-            print(tasks)
             return tasks
             
         except APIResponseError as e:
@@ -65,7 +64,6 @@ class NotionClient:
                 'time_spent': self._get_number_value(properties.get(self.column_mappings.get('time_spent', '工作时间（分钟）'), {})),
                 'screenshots': self._get_files_value(properties.get(self.column_mappings.get('screenshots', '截屏'), {})),
                 'due_date': self._get_date_value(properties.get(self.column_mappings.get('due_date', '截止日期'), {})),
-                'salary': self._get_number_value(properties.get(self.column_mappings.get('salary', '工资'), {})),
                 'created_time': page['created_time'],
                 'last_edited_time': page['last_edited_time']
             }
@@ -81,12 +79,6 @@ class NotionClient:
         if title_prop.get('title'):
             return title_prop['title'][0]['plain_text']
         return "Untitled"
-    
-    def _get_select_value(self, select_prop: Dict) -> str:
-        """Extract value from select property"""
-        if select_prop.get('select'):
-            return select_prop['select']['name']
-        return ""
     
     def _get_select_value(self, select_prop: Dict) -> str:
         """Extract value from select property"""
@@ -124,50 +116,48 @@ class NotionClient:
             # Prepare properties to update
             properties = {}
             
-            # Update time spent (convert seconds to minutes)
+            # Get current time spent from the task
+            current_task = None
+            try:
+                response = self.client.pages.retrieve(page_id=task_id)
+                current_task = self._parse_task_page(response)
+            except Exception as e:
+                self.logger.warning(f"Could not retrieve current task data: {e}")
+            
+            # Calculate total time: current time + new session time
+            current_time_minutes = current_task.get('time_spent', 0) if current_task else 0
+            new_session_minutes = round(time_spent / 60, 2)  # Convert seconds to minutes with 2 decimal places
+            total_time_minutes = current_time_minutes + new_session_minutes
+            
+            # Update time spent
             time_column = self.column_mappings.get('time_spent', '时间')
-            time_minutes = round(time_spent / 60, 2)  # Convert seconds to minutes with 2 decimal places
             properties[time_column] = {
-                "number": time_minutes
+                "number": total_time_minutes
             }
-            
-            # Update screenshots (Files type)
-            if screenshots:
-                screenshot_column = self.column_mappings.get('screenshots', '截屏')
-                try:
-                    # Upload screenshots to Notion
-                    uploaded_urls = self.file_uploader.upload_screenshots(screenshots, self.database_id)
-                    
-                    if uploaded_urls:
-                        # Update the Files property with uploaded file URLs
-                        properties[screenshot_column] = {
-                            "files": [
-                                {
-                                    "name": os.path.basename(screenshot_path),
-                                    "type": "external",
-                                    "external": {
-                                        "url": url
-                                    }
-                                }
-                                for screenshot_path, url in zip(screenshots, uploaded_urls)
-                            ]
-                        }
-                        self.logger.info(f"Uploaded {len(uploaded_urls)} screenshots to Notion")
-                    else:
-                        self.logger.warning("Failed to upload screenshots to Notion")
-                        
-                except Exception as e:
-                    self.logger.error(f"Error uploading screenshots: {e}")
-                    # Fallback: just log the screenshot paths
-                    self.logger.info(f"Screenshots taken: {screenshots}")
-            
+            screenshot_column = self.column_mappings.get('screenshots', '截屏')
+            file_ids = self.file_uploader.upload_screenshots(screenshots)
+            properties[screenshot_column] = {
+                "type": "files",
+                "files": [
+                    {
+                        "type": "file_upload",
+                        "file_upload": {
+                            "id": file_id
+                        },
+                        "name": os.path.basename(screenshot_path),
+                    }
+                    for screenshot_path, file_id in zip(screenshots, file_ids)
+                ]
+            }
+    
+ 
             # Update the page
             self.client.pages.update(
                 page_id=task_id,
                 properties=properties
             )
             
-            self.logger.info(f"Updated task {task_id} with {time_minutes} minutes ({time_spent} seconds)")
+            self.logger.info(f"Updated task {task_id} with {total_time_minutes} minutes total (added {new_session_minutes} minutes from {time_spent} seconds session)")
             
         except APIResponseError as e:
             self.logger.error(f"Notion API error updating task: {e}")

@@ -40,14 +40,13 @@ Your Notion database should have these properties:
 - **工作时间（分钟）** (Number): Total time spent on task (in minutes)
 - **截屏** (Files): Screenshot files
 - **截止日期** (Date): Task due date
-- **工资** (Number): Task salary
 
 ### Example Database Structure
 ```
-| 任务名称 | 人员 | 工作时间（分钟） | 截屏 | 截止日期 | 工资 |
+| 任务名称 | 人员 | 工作时间（分钟） | 截屏 | 截止日期 |
 |----------|------|----------------|------|----------|------|
-| 开发项目 | 高晓阳 | 60.0 | screenshot_20231201_143022.png | 2024-01-15 | 5000 |
-| 设计任务 | 张三 | 0 | | 2024-01-20 | 3000 |
+| 开发项目 | 高晓阳 | 60.0 | screenshot_20231201_143022.png | 2024-01-15  |
+| 设计任务 | 张三 | 0 | | 2024-01-20 |
 ```
 
 ## 3. Configuration Setup
@@ -65,7 +64,6 @@ Your Notion database should have these properties:
       time_spent: "工作时间（分钟）"
       screenshots: "截屏"
       due_date: "截止日期"
-      salary: "工资"
    ```
 
 ## 4. Install Dependencies

@@ -22,6 +22,7 @@ class TimeTracker(QObject):
         self.current_task_title: Optional[str] = None
         self.is_tracking = False
         self.total_seconds = 0
+        self.previous_time_minutes = 0  # Previous time spent on task in minutes
         self.screenshots = []
         
         # Timer for updating display
@@ -31,7 +32,7 @@ class TimeTracker(QObject):
         
         self.logger = logging.getLogger(__name__)
     
-    def start_tracking(self, task_id: str, task_title: str):
+    def start_tracking(self, task_id: str, task_title: str, previous_time_minutes: int = 0):
         """Start tracking time for a task"""
         if self.is_tracking:
             self.stop_tracking()
@@ -41,11 +42,12 @@ class TimeTracker(QObject):
         self.current_task_title = task_title
         self.is_tracking = True
         self.total_seconds = 0
+        self.previous_time_minutes = previous_time_minutes
         self.screenshots.clear()
         
         self.update_timer.start()
         
-        self.logger.info(f"Started tracking task: {task_title} (ID: {task_id})")
+        self.logger.info(f"Started tracking task: {task_title} (ID: {task_id}) with previous time: {previous_time_minutes} minutes")
     
     def stop_tracking(self):
         """Stop tracking time"""
@@ -76,7 +78,6 @@ class TimeTracker(QObject):
         """Add screenshot to current session"""
         if self.is_tracking:
             self.screenshots.append(screenshot_path)
-            self.logger.info(f"Added screenshot to session: {screenshot_path}")
     
     def _update_display(self):
         """Update time display"""
@@ -85,17 +86,20 @@ class TimeTracker(QObject):
         
         current_time = datetime.now()
         duration = current_time - self.start_time
-        elapsed_seconds = int(duration.total_seconds())
+        current_session_seconds = int(duration.total_seconds())
+        
+        # Calculate total time: previous time + current session time
+        total_seconds = (self.previous_time_minutes * 60) + current_session_seconds
         
         # Emit time update signal
-        formatted_time = self._format_time(elapsed_seconds)
+        formatted_time = self._format_time(total_seconds)
         self.time_updated.emit(formatted_time)
     
     def _format_time(self, seconds: int) -> str:
         """Format seconds into HH:MM:SS"""
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        secs = seconds % 60
+        hours = int(seconds // 3600)    
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
     
     def get_current_task(self) -> Optional[dict]:
@@ -120,4 +124,7 @@ class TimeTracker(QObject):
             return 0
         
         duration = datetime.now() - self.start_time
-        return int(duration.total_seconds()) 
+        current_session_seconds = int(duration.total_seconds())
+        
+        # Return total time: previous time + current session time
+        return (self.previous_time_minutes * 60) + current_session_seconds 
