@@ -9,7 +9,8 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QListWidget, QListWidgetItem, QLabel,
     QTextEdit, QMessageBox, QProgressBar, QFrame,
-    QSplitter, QGroupBox, QGridLayout, QComboBox
+    QSplitter, QGroupBox, QGridLayout, QComboBox,
+    QDialog
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QPalette, QColor
@@ -17,6 +18,36 @@ from PyQt6.QtGui import QFont, QPalette, QColor
 from .notion_client import NotionClient
 from .time_tracker import TimeTracker
 from .screenshot_manager import ScreenshotManager
+
+class LoadingDialog(QDialog):
+    """Dialog for showing loading/uploading status"""
+    def __init__(self, parent=None, message="Loading..."):
+        super().__init__(parent)
+        self.setWindowTitle("Status")
+        self.setFixedSize(300, 100)
+        self.setModal(True)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint)
+        
+        layout = QVBoxLayout(self)
+        
+        # Message label
+        self.message_label = QLabel(message)
+        self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.message_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333333;")
+        layout.addWidget(self.message_label)
+        
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)  # Indeterminate progress
+        layout.addWidget(self.progress_bar)
+        
+        # Center the dialog on parent
+        if parent:
+            self.move(parent.geometry().center() - self.rect().center())
+    
+    def set_message(self, message: str):
+        """Update the message text"""
+        self.message_label.setText(message)
 
 class TaskLoaderThread(QThread):
     """Thread for loading tasks from Notion"""
@@ -199,11 +230,6 @@ class MainWindow(QMainWindow):
         
         layout.addLayout(current_task_layout)
         
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
-        
         # Control buttons
         button_layout = QHBoxLayout()
         
@@ -279,9 +305,9 @@ class MainWindow(QMainWindow):
         self.refresh_btn.setEnabled(False)
         self.refresh_btn.setText("Loading...")
         
-        # Show progress bar
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # Indeterminate progress
+        # Show loading dialog
+        self.loading_dialog = LoadingDialog(self, "Loading tasks from Notion...")
+        self.loading_dialog.show()
         
         # Create and start loader thread
         self.loader_thread = TaskLoaderThread(self.notion_client)
@@ -291,6 +317,11 @@ class MainWindow(QMainWindow):
     
     def on_tasks_loaded(self, tasks: List[Dict]):
         """Handle loaded tasks"""
+        # Close loading dialog
+        if hasattr(self, 'loading_dialog'):
+            self.loading_dialog.close()
+            self.loading_dialog = None
+        
         self.task_list.clear()
         self.tasks = tasks
         
@@ -304,15 +335,18 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Loaded {len(tasks)} tasks")
         self.refresh_btn.setEnabled(True)
         self.refresh_btn.setText("Refresh Tasks")
-        self.progress_bar.setVisible(False)
         self.log_message(f"Loaded {len(tasks)} tasks from Notion")
     
     def on_tasks_error(self, error: str):
         """Handle task loading error"""
+        # Close loading dialog
+        if hasattr(self, 'loading_dialog'):
+            self.loading_dialog.close()
+            self.loading_dialog = None
+        
         self.status_label.setText("Error loading tasks")
         self.refresh_btn.setEnabled(True)
         self.refresh_btn.setText("Refresh Tasks")
-        self.progress_bar.setVisible(False)
         QMessageBox.warning(self, "Error", f"Failed to load tasks: {error}")
         self.log_message(f"Error loading tasks: {error}")
     
@@ -367,8 +401,6 @@ class MainWindow(QMainWindow):
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.task_list.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # Indeterminate progress
         
         # Display initial total time (previous time + 0 seconds current session)
         # This ensures Elapsed Time matches the "已用时间" when starting
@@ -394,9 +426,10 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(False)
         self.task_list.setEnabled(True)
         
-        # Show progress bar for updating Notion
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # Indeterminate progress
+        # Show uploading dialog
+        self.uploading_dialog = LoadingDialog(self, "Uploading to Notion...")
+        self.uploading_dialog.show()
+        
         self.status_label.setText("Updating task in Notion...")
         
         # Update time display to show final total time
@@ -421,24 +454,30 @@ class MainWindow(QMainWindow):
             previous_time_minutes = self.selected_task.get('time_spent', 0)
             new_session_minutes = round(seconds / 60, 2)
             self.selected_task['time_spent'] = previous_time_minutes + new_session_minutes
-            
+             # Update the task_list to reflect the new time_spent for the selected task
+            for i in range(self.task_list.count()):
+                item = self.task_list.item(i)
+                task = item.data(Qt.ItemDataRole.UserRole)
+                if task and task.get('id') == self.selected_task.get('id'):
+                    task['time_spent'] = self.selected_task['time_spent']
+                    item.setData(Qt.ItemDataRole.UserRole, task)
+                    break
             # Update the time display to show the new total time
             total_seconds = self.selected_task['time_spent'] * 60
             self.time_label.setText(self._format_time(total_seconds))
             
-            # Start background thread to update Notion
-            self.update_thread = TaskUpdateThread(
-                self.notion_client,
-                self.selected_task['id'],
-                seconds,
-                screenshots
-            )
-            self.update_thread.update_completed.connect(self.on_update_completed)
-            self.update_thread.error_occurred.connect(self.on_update_error)
-            self.update_thread.start()
+                    # Start background thread to update Notion
+        self.update_thread = TaskUpdateThread(
+            self.notion_client,
+            self.selected_task['id'],
+            seconds,
+            screenshots
+        )
+        self.update_thread.update_completed.connect(self.on_update_completed)
+        self.update_thread.error_occurred.connect(self.on_update_error)
+        self.update_thread.start()
         
-        # Show completion message
-        hours = seconds // 3600
+        # Log completion message
         total_minutes = round(seconds / 60, 2)
         
         # Format time for display
@@ -463,11 +502,6 @@ class MainWindow(QMainWindow):
                 else:
                     time_display = f"{hours} 小时 {remaining_minutes} 分钟 {remaining_seconds} 秒"
         
-        message = f"work completed!\n"
-        message += f"Time spent: {time_display}\n"
-        message += f"Screenshots taken: {len(screenshots)}"
-        
-        QMessageBox.information(self, "Session Complete", message)
         self.log_message(f"Session completed: {time_display}, {len(screenshots)} screenshots")
     
     def on_screenshot_taken(self, screenshot_path: str):
@@ -477,7 +511,11 @@ class MainWindow(QMainWindow):
     
     def on_update_completed(self):
         """Handle task update completion"""
-        self.progress_bar.setVisible(False)
+        # Close uploading dialog
+        if hasattr(self, 'uploading_dialog'):
+            self.uploading_dialog.close()
+            self.uploading_dialog = None
+        
         self.status_label.setText("Ready")
         self.log_message("Task updated successfully in Notion")
         
@@ -488,18 +526,17 @@ class MainWindow(QMainWindow):
             info_text += f"已用时间: {self._format_time_for_display(self.selected_task['time_spent'])}\n"
             info_text += f"截止日期: {self.selected_task['due_date']}\n"
             self.task_info.setText(info_text)
-        
-        # Refresh tasks list to show updated time
-        self.load_tasks()
     
     def on_update_error(self, error: str):
         """Handle task update error"""
-        self.progress_bar.setVisible(False)
+        # Close uploading dialog
+        if hasattr(self, 'uploading_dialog'):
+            self.uploading_dialog.close()
+            self.uploading_dialog = None
+        
         self.status_label.setText("Error updating task")
-        QMessageBox.warning(self, "Update Error", f"Failed to update task in Notion: {error}")
+        QMessageBox.warning(self, "Upload Error", f"Failed to update task in Notion: {error}")
         self.log_message(f"Error updating task: {error}")
-    
-
     
     def log_message(self, message: str):
         """Add message to log"""
