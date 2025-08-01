@@ -124,7 +124,12 @@ class NotionClient:
     def _get_files_value(self, files_prop: Dict) -> str:
         """Extract value from files property"""
         if files_prop.get('files'):
-            file_names = [file.get('name', '') for file in files_prop['files']]
+            file_names = []
+            for file in files_prop['files']:
+                if file.get('type') == 'file_upload' and file.get('file_upload'):
+                    file_names.append(file.get('name', ''))
+                elif file.get('type') == 'external' and file.get('external'):
+                    file_names.append(file.get('name', ''))
             return ', '.join(file_names)
         return ""
     
@@ -140,7 +145,7 @@ class NotionClient:
             # Prepare properties to update
             properties = {}
             
-            # Get current time spent from the task
+            # Get current task data to preserve existing screenshots
             current_task = None
             try:
                 response = self.client.pages.retrieve(page_id=task_id)
@@ -158,23 +163,39 @@ class NotionClient:
             properties[time_column] = {
                 "number": total_time_minutes
             }
+            
+            # Handle screenshots - preserve existing ones and add new ones
             screenshot_column = self.column_mappings.get('screenshots', '截屏')
+            
+            # Get existing screenshots from current task
+            existing_files = []
+            if current_task and 'screenshots' in current_task:
+                # Get the raw files property from the response
+                screenshot_prop = response['properties'].get(screenshot_column, {})
+                if screenshot_prop.get('files'):
+                    existing_files = screenshot_prop['files']
+            
+            # Upload new screenshots
             file_ids = self.file_uploader.upload_screenshots(screenshots)
+            
+            # Combine existing and new files
+            all_files = existing_files.copy()
+            for screenshot_path, file_id in zip(screenshots, file_ids):
+                new_file = {
+                    "type": "file_upload",
+                    "file_upload": {
+                        "id": file_id
+                    },
+                    "name": os.path.basename(screenshot_path),
+                }
+                all_files.append(new_file)
+            
+            # Update screenshots property with all files
             properties[screenshot_column] = {
                 "type": "files",
-                "files": [
-                    {
-                        "type": "file_upload",
-                        "file_upload": {
-                            "id": file_id
-                        },
-                        "name": os.path.basename(screenshot_path),
-                    }
-                    for screenshot_path, file_id in zip(screenshots, file_ids)
-                ]
+                "files": all_files
             }
     
- 
             # Update the page
             self.client.pages.update(
                 page_id=task_id,
@@ -182,6 +203,7 @@ class NotionClient:
             )
             
             self.logger.info(f"Updated task {task_id} with {total_time_minutes} minutes total (added {new_session_minutes} minutes from {time_spent} seconds session)")
+            self.logger.info(f"Added {len(screenshots)} new screenshots, total screenshots: {len(all_files)}")
             
         except APIResponseError as e:
             self.logger.error(f"Notion API error updating task: {e}")
