@@ -32,9 +32,28 @@ class NotionClient:
     def get_tasks(self) -> List[Dict]:
         """Fetch tasks from Notion database"""
         try:
-            # Get all tasks from database (no filter for now)
+            # Filter for tasks with status "未开始" (Not Started) or "进行中" (In Progress)
+            status_column = self.column_mappings.get('status', '状态')
+            filter_conditions = {
+                "or": [
+                    {
+                        "property": status_column,
+                        "status": {
+                            "equals": "未开始"
+                        }
+                    },
+                    {
+                        "property": status_column,
+                        "status": {
+                            "equals": "进行中"
+                        }
+                    }
+                ]
+            }
+            
             response = self.client.databases.query(
-                database_id=self.database_id
+                database_id=self.database_id,
+                filter=filter_conditions
             )
             
             tasks = []
@@ -61,6 +80,7 @@ class NotionClient:
                 'id': page['id'],
                 'title': self._get_title(properties.get(self.column_mappings.get('task_name', '任务名称'), {})),
                 'assignee': self._get_select_value(properties.get(self.column_mappings.get('assignee', '负责人'), {})),
+                'status': self._get_status_value(properties.get(self.column_mappings.get('status', '状态'), {})),
                 'time_spent': self._get_number_value(properties.get(self.column_mappings.get('time_spent', '工作时间（分钟）'), {})),
                 'screenshots': self._get_files_value(properties.get(self.column_mappings.get('screenshots', '截屏'), {})),
                 'due_date': self._get_date_value(properties.get(self.column_mappings.get('due_date', '截止日期'), {})),
@@ -79,6 +99,10 @@ class NotionClient:
         if title_prop.get('title'):
             return title_prop['title'][0]['plain_text']
         return "Untitled"
+    
+    def _get_status_value(self, status_prop: Dict) -> str:
+        """Extract value from status property"""
+        return status_prop.get('status', {}).get("name", "")
     
     def _get_select_value(self, select_prop: Dict) -> str:
         """Extract value from select property"""
