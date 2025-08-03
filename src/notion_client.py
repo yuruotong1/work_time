@@ -3,6 +3,7 @@ Notion API Client for Work Time Tracker
 """
 
 import os
+import sys
 from typing import List, Dict, Optional
 from notion_client import Client
 from notion_client.errors import APIResponseError
@@ -10,12 +11,20 @@ import logging
 from .file_uploader import FileUploader
 import yaml
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 class NotionClient:
     """Client for interacting with Notion API"""
     
     def __init__(self):
         """Initialize Notion client with credentials"""
-        with open('config.yaml', 'r') as file:
+        with open(resource_path('config.yaml'), 'r') as file:
             config = yaml.safe_load(file)
 
         self.token = config['notion']['api']

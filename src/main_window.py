@@ -363,7 +363,7 @@ class MainWindow(QMainWindow):
             self.task_info.setText(info_text)
             # Enable start button
             self.start_btn.setEnabled(True)
-            self.current_task_label.setText(task['title'])
+            self.current_task_label.setText(task['title'][:20] + "...")
             
             # Display total time spent on this task as elapsed time
             # This ensures Elapsed Time matches the "已用时间" when selecting a task
