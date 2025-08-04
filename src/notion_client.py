@@ -24,7 +24,7 @@ class NotionClient:
     
     def __init__(self):
         """Initialize Notion client with credentials"""
-        with open(resource_path('config.yaml'), 'r') as file:
+        with open(resource_path('config.yaml'), 'r', encoding='utf-8') as file:
             config = yaml.safe_load(file)
 
         self.token = config['notion']['api']
