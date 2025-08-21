@@ -16,7 +16,7 @@ class ScreenshotManager(QThread):
     
     screenshot_taken = pyqtSignal(str)  # Signal emitted when screenshot is taken
     
-    def __init__(self, interval_minutes: int = 5):
+    def __init__(self, interval_minutes: int = 20):
         """Initialize screenshot manager"""
         super().__init__()
         self.interval_minutes = interval_minutes
@@ -42,6 +42,9 @@ class ScreenshotManager(QThread):
     
     def run(self):
         """Main capture loop"""
+        # Wait for first interval before taking first screenshot
+        time.sleep(self.interval_seconds)
+        
         while self.is_running:
             try:
                 # Take screenshot
