@@ -10,6 +10,7 @@ from notion_client.errors import APIResponseError
 import logging
 from .file_uploader import FileUploader
 import yaml
+from datetime import datetime
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -199,6 +200,19 @@ class NotionClient:
                 }
                 all_files.append(new_file)
             
+            # Check if total files exceed 70 and remove oldest ones if necessary
+            max_files = 70
+            if len(all_files) > max_files:
+                files_to_remove = len(all_files) - max_files
+                self.logger.info(f"Total screenshots ({len(all_files)}) exceed limit ({max_files}). Removing {files_to_remove} oldest files.")
+                
+                # Sort files by creation time (oldest first) based on filename or upload timestamp
+                sorted_files = self._sort_files_by_time(all_files)
+                
+                # Keep only the newest 70 files
+                all_files = sorted_files[-max_files:]
+                self.logger.info(f"Removed {files_to_remove} oldest screenshots. Current count: {len(all_files)}")
+            
             # Update screenshots property with all files
             properties[screenshot_column] = {
                 "type": "files",
@@ -219,6 +233,37 @@ class NotionClient:
         except Exception as e:
             self.logger.error(f"Error updating task: {e}")
     
+    def _sort_files_by_time(self, files: List[Dict]) -> List[Dict]:
+        """Sort files by creation time (oldest first)"""
+        try:
+            # For files with timestamps in filename (e.g., 20231201_143022.png)
+            def get_file_timestamp(file_obj):
+                try:
+                    file_name = file_obj.get('name', '')
+                    if '_' in file_name:
+                        # Extract timestamp from filename like "20231201_143022.png"
+                        timestamp_part = file_name.split('.')[0]  # Remove extension
+                        if len(timestamp_part) == 15 and '_' in timestamp_part:  # Format: YYYYMMDD_HHMMSS
+                            return timestamp_part
+                    
+                    # If no timestamp in name, use file upload creation time if available
+                    if file_obj.get('type') == 'file_upload':
+                        # Return current time as fallback (newest)
+                        return datetime.now().strftime("%Y%m%d_%H%M%S")
+                    
+                    return "19700101_000000"  # Very old timestamp as fallback
+                    
+                except Exception:
+                    return "19700101_000000"  # Very old timestamp as fallback
+            
+            # Sort files by timestamp (oldest first)
+            sorted_files = sorted(files, key=get_file_timestamp)
+            return sorted_files
+            
+        except Exception as e:
+            self.logger.warning(f"Error sorting files by time: {e}")
+            return files  # Return original order if sorting fails
+
     def test_connection(self) -> bool:
         """Test connection to Notion API"""
         try:
