@@ -4,6 +4,7 @@ Notion API Client for Work Time Tracker
 
 import os
 import sys
+import time
 from typing import List, Dict, Optional
 from notion_client import Client
 from notion_client.errors import APIResponseError
@@ -11,6 +12,26 @@ import logging
 from .file_uploader import FileUploader
 import yaml
 from datetime import datetime
+
+MAX_RETRY = 3
+BASE_DELAY = 1.0
+
+
+def _retry(func, max_attempts=MAX_RETRY, base_delay=BASE_DELAY):
+    """Retry a callable with exponential backoff."""
+    last_exc = None
+    for attempt in range(max_attempts):
+        try:
+            return func()
+        except Exception as e:
+            last_exc = e
+            if attempt < max_attempts - 1:
+                delay = base_delay * (2 ** attempt)
+                logging.getLogger(__name__).warning(
+                    f"Notion API call failed (attempt {attempt + 1}/{max_attempts}): {e}. Retrying in {delay:.1f}s..."
+                )
+                time.sleep(delay)
+    raise last_exc
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -61,10 +82,10 @@ class NotionClient:
                 ]
             }
             
-            response = self.client.databases.query(
+            response = _retry(lambda: self.client.databases.query(
                 database_id=self.database_id,
                 filter=filter_conditions
-            )
+            ))
             
             tasks = []
             for page in response['results']:
@@ -150,88 +171,70 @@ class NotionClient:
         return ""
     
     def update_task_time(self, task_id: str, time_spent: int, screenshots: List[str]):
-        """Update task with time spent and screenshot paths"""
+        """Update task with time spent and screenshot collage (with retry)"""
         try:
-            # Prepare properties to update
             properties = {}
-            
-            # Get current task data to preserve existing screenshots
+
+            # Retrieve current task data (with retry)
             current_task = None
+            response = None
             try:
-                response = self.client.pages.retrieve(page_id=task_id)
+                response = _retry(lambda: self.client.pages.retrieve(page_id=task_id))
                 current_task = self._parse_task_page(response)
             except Exception as e:
                 self.logger.warning(f"Could not retrieve current task data: {e}")
-            
-            # Calculate total time: current time + new session time
+
+            # Calculate total time
             current_time_minutes = current_task.get('time_spent', 0) if current_task else 0
-            new_session_minutes = round(time_spent / 60, 2)  # Convert seconds to minutes with 2 decimal places
+            new_session_minutes = round(time_spent / 60, 2)
             total_time_minutes = current_time_minutes + new_session_minutes
-            
-            # Update time spent
+
             time_column = self.column_mappings.get('time_spent', '时间')
-            properties[time_column] = {
-                "number": total_time_minutes
-            }
-            
-            # Handle screenshots - preserve existing ones and add new ones
+            properties[time_column] = {"number": total_time_minutes}
+
+            # Handle screenshots
             screenshot_column = self.column_mappings.get('screenshots', '截屏')
-            
-            # Get existing screenshots from current task
+
             existing_files = []
-            if current_task and 'screenshots' in current_task:
-                # Get the raw files property from the response
+            if response is not None:
                 screenshot_prop = response['properties'].get(screenshot_column, {})
                 if screenshot_prop.get('files'):
                     existing_files = screenshot_prop['files']
-            
-            # Upload new screenshots
-            file_ids = self.file_uploader.upload_screenshots(screenshots)
-            
-            # Combine existing and new files
+
+            # Upload: creates one collage image per session, returns [(path, id)]
+            uploaded = self.file_uploader.upload_screenshots(screenshots)
+
             all_files = existing_files.copy()
-            for screenshot_path, file_id in zip(screenshots, file_ids):
-                new_file = {
+            for path, file_id in uploaded:
+                all_files.append({
                     "type": "file_upload",
-                    "file_upload": {
-                        "id": file_id
-                    },
-                    "name": os.path.basename(screenshot_path),
-                }
-                all_files.append(new_file)
-            
-            # Check if total files exceed 70 and remove oldest ones if necessary
-            max_files = 70
+                    "file_upload": {"id": file_id},
+                    "name": os.path.basename(path),
+                })
+
+            # Keep only the most recent 20 collages to avoid Notion slowdown
+            max_files = 20
             if len(all_files) > max_files:
-                files_to_remove = len(all_files) - max_files
-                self.logger.info(f"Total screenshots ({len(all_files)}) exceed limit ({max_files}). Removing {files_to_remove} oldest files.")
-                
-                # Sort files by creation time (oldest first) based on filename or upload timestamp
                 sorted_files = self._sort_files_by_time(all_files)
-                
-                # Keep only the newest 70 files
                 all_files = sorted_files[-max_files:]
-                self.logger.info(f"Removed {files_to_remove} oldest screenshots. Current count: {len(all_files)}")
-            
-            # Update screenshots property with all files
-            properties[screenshot_column] = {
-                "type": "files",
-                "files": all_files
-            }
-    
-            # Update the page
-            self.client.pages.update(
-                page_id=task_id,
-                properties=properties
+                self.logger.info(f"Trimmed to {max_files} most recent collages")
+
+            properties[screenshot_column] = {"type": "files", "files": all_files}
+
+            # Push update to Notion (with retry)
+            _retry(lambda: self.client.pages.update(page_id=task_id, properties=properties))
+
+            self.logger.info(
+                f"Updated task {task_id}: total={total_time_minutes:.2f}min "
+                f"(+{new_session_minutes:.2f}min), collages in Notion: {len(all_files)}"
             )
-            
-            self.logger.info(f"Updated task {task_id} with {total_time_minutes} minutes total (added {new_session_minutes} minutes from {time_spent} seconds session)")
-            self.logger.info(f"Added {len(screenshots)} new screenshots, total screenshots: {len(all_files)}")
-            
+
         except APIResponseError as e:
             self.logger.error(f"Notion API error updating task: {e}")
+            raise
         except Exception as e:
             self.logger.error(f"Error updating task: {e}")
+            raise
     
     def _sort_files_by_time(self, files: List[Dict]) -> List[Dict]:
         """Sort files by creation time (oldest first)"""
@@ -267,7 +270,7 @@ class NotionClient:
     def test_connection(self) -> bool:
         """Test connection to Notion API"""
         try:
-            self.client.databases.retrieve(database_id=self.database_id)
+            _retry(lambda: self.client.databases.retrieve(database_id=self.database_id))
             return True
         except Exception as e:
             self.logger.error(f"Connection test failed: {e}")
