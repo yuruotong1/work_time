@@ -18,6 +18,8 @@ from PyQt6.QtGui import QFont, QPalette, QColor
 from .notion_client import NotionClient
 from .time_tracker import TimeTracker
 from .screenshot_manager import ScreenshotManager
+from .upload_queue import UploadQueue
+from .background_uploader import BackgroundUploader
 
 class LoadingDialog(QDialog):
     """Dialog for showing loading/uploading status"""
@@ -271,15 +273,30 @@ class MainWindow(QMainWindow):
             self.notion_client = NotionClient()
             self.time_tracker = TimeTracker()
             self.screenshot_manager = ScreenshotManager()
-            
-            # Test connection
+
+            # Local queue + background uploader (infinite retry)
+            self.upload_queue = UploadQueue()
+            self.background_uploader = BackgroundUploader(self.notion_client, self.upload_queue)
+            self.background_uploader.time_synced.connect(self.on_time_synced)
+            self.background_uploader.screenshots_synced.connect(self.on_screenshots_synced)
+            self.background_uploader.time_failed.connect(self.on_time_failed)
+            self.background_uploader.screenshots_failed.connect(self.on_screenshots_failed)
+            self.background_uploader.start()
+
+            # Warn if Notion unreachable, but don't block startup
             if not self.notion_client.test_connection():
-                QMessageBox.warning(self, "Connection Error", 
-                                  "Failed to connect to Notion. Please check your credentials.")
-            
+                QMessageBox.warning(self, "连接提示",
+                                    "Notion 暂时无法连接，任务列表可能为空。\n"
+                                    "本次及历史工作记录会在网络恢复后自动同步。")
+
+            # Retry any sessions left over from previous app runs
+            if self.upload_queue.has_pending():
+                self.log_message("检测到未上传的历史记录，后台重试中...")
+                self.background_uploader.trigger()
+
         except Exception as e:
-            QMessageBox.critical(self, "Initialization Error", 
-                               f"Failed to initialize application: {str(e)}")
+            QMessageBox.critical(self, "初始化错误",
+                                 f"应用启动失败: {str(e)}")
             self.logger.error(f"Initialization error: {e}")
     
     def setup_connections(self):
@@ -415,32 +432,19 @@ class MainWindow(QMainWindow):
     
     def stop_tracking(self):
         """Stop time tracking"""
-        # Stop time tracking
         self.time_tracker.stop_tracking()
-        
-        # Stop screenshot capture
         self.screenshot_manager.stop_capture()
-        
-        # Update UI immediately
+
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.task_list.setEnabled(True)
-        
-        # Show uploading dialog
-        self.uploading_dialog = LoadingDialog(self, "Uploading to Notion...")
-        self.uploading_dialog.show()
-        
-        self.status_label.setText("Updating task in Notion...")
-        
-        # Update time display to show final total time
+
         if self.selected_task:
-            # Get updated time from the task (it should have been updated by the time tracker)
-            # This ensures Elapsed Time shows the updated total time after stopping
             total_minutes = self.selected_task.get('time_spent', 0)
-            total_seconds = total_minutes * 60
-            self.time_label.setText(self._format_time(total_seconds))
-        
-        self.log_message("Stopped tracking")
+            self.time_label.setText(self._format_time(total_minutes * 60))
+
+        self.status_label.setText("正在同步到 Notion...")
+        self.log_message("已停止计时，准备同步...")
     
     def update_time_display(self, time_str: str):
         """Update time display with total time (previous + current session)"""
@@ -448,13 +452,10 @@ class MainWindow(QMainWindow):
         self.time_label.setText(time_str)
     
     def on_session_completed(self, seconds: int, screenshots: List[str]):
-        """Handle session completion"""
-        # Update the selected task's time_spent to reflect the new total
+        """Handle session completion - save locally first, then sync in background."""
         if self.selected_task:
-            previous_time_minutes = self.selected_task.get('time_spent', 0)
             new_session_minutes = round(seconds / 60, 2)
-            self.selected_task['time_spent'] = previous_time_minutes + new_session_minutes
-             # Update the task_list to reflect the new time_spent for the selected task
+            self.selected_task['time_spent'] = self.selected_task.get('time_spent', 0) + new_session_minutes
             for i in range(self.task_list.count()):
                 item = self.task_list.item(i)
                 task = item.data(Qt.ItemDataRole.UserRole)
@@ -462,81 +463,53 @@ class MainWindow(QMainWindow):
                     task['time_spent'] = self.selected_task['time_spent']
                     item.setData(Qt.ItemDataRole.UserRole, task)
                     break
-            # Update the time display to show the new total time
-            total_seconds = self.selected_task['time_spent'] * 60
-            self.time_label.setText(self._format_time(total_seconds))
-            
-                    # Start background thread to update Notion
-        self.update_thread = TaskUpdateThread(
-            self.notion_client,
-            self.selected_task['id'],
-            seconds,
-            screenshots
-        )
-        self.update_thread.update_completed.connect(self.on_update_completed)
-        self.update_thread.error_occurred.connect(self.on_update_error)
-        self.update_thread.start()
-        
-        # Log completion message
-        total_minutes = round(seconds / 60, 2)
-        
-        # Format time for display
-        if total_minutes < 1:
-            time_display = f"{seconds} 秒"
-        else:
-            total_minutes_int = int(total_minutes)
-            remaining_seconds = int((total_minutes - total_minutes_int) * 60)
-            
-            if total_minutes_int < 60:
-                if remaining_seconds == 0:
-                    time_display = f"{total_minutes_int} 分钟"
-                else:
-                    time_display = f"{total_minutes_int} 分钟 {remaining_seconds} 秒"
-            else:
-                hours = total_minutes_int // 60
-                remaining_minutes = total_minutes_int % 60
-                if remaining_minutes == 0 and remaining_seconds == 0:
-                    time_display = f"{hours} 小时"
-                elif remaining_seconds == 0:
-                    time_display = f"{hours} 小时 {remaining_minutes} 分钟"
-                else:
-                    time_display = f"{hours} 小时 {remaining_minutes} 分钟 {remaining_seconds} 秒"
-        
-        self.log_message(f"Session completed: {time_display}, {len(screenshots)} screenshots")
+            self.time_label.setText(self._format_time(self.selected_task['time_spent'] * 60))
+
+            # 1. 先存本地队列（断网/崩溃也不会丢失）
+            self.upload_queue.add(
+                self.selected_task['id'],
+                self.selected_task['title'],
+                seconds,
+                screenshots,
+            )
+            time_display = self._format_time_for_display(new_session_minutes)
+            self.log_message(f"已保存本地 - 本次时间: {time_display}，截图: {len(screenshots)} 张")
+
+            # 2. 立即触发后台上传（失败会自动每2分钟重试）
+            self.background_uploader.trigger()
+            self.status_label.setText("正在后台同步时间到 Notion...")
     
     def on_screenshot_taken(self, screenshot_path: str):
         """Handle screenshot taken"""
         self.time_tracker.add_screenshot(screenshot_path)
         self.log_message(f"Screenshot saved: {screenshot_path}")
     
-    def on_update_completed(self):
-        """Handle task update completion"""
-        # Close uploading dialog
-        if hasattr(self, 'uploading_dialog'):
-            self.uploading_dialog.close()
-            self.uploading_dialog = None
-        
-        self.status_label.setText("Ready")
-        self.log_message("Task updated successfully in Notion")
-        
-        # Update the task info display to show the new total time
+    def on_time_synced(self, task_title: str):
+        """Called when time is successfully uploaded to Notion."""
+        self.status_label.setText("时间已同步 ✓")
+        self.log_message(f"✓ 时间已同步到 Notion：{task_title}")
         if self.selected_task:
             info_text = f"任务名称: {self.selected_task['title']}\n"
             info_text += f"负责人: {self.selected_task['assignee']}\n"
             info_text += f"已用时间: {self._format_time_for_display(self.selected_task['time_spent'])}\n"
             info_text += f"截止日期: {self.selected_task['due_date']}\n"
             self.task_info.setText(info_text)
-    
-    def on_update_error(self, error: str):
-        """Handle task update error"""
-        # Close uploading dialog
-        if hasattr(self, 'uploading_dialog'):
-            self.uploading_dialog.close()
-            self.uploading_dialog = None
-        
-        self.status_label.setText("Error updating task")
-        QMessageBox.warning(self, "Upload Error", f"Failed to update task in Notion: {error}")
-        self.log_message(f"Error updating task: {error}")
+
+    def on_screenshots_synced(self, task_title: str):
+        """Called when screenshots are successfully uploaded."""
+        self.status_label.setText("同步完成 ✓")
+        self.log_message(f"✓ 截图已上传：{task_title}")
+
+    def on_time_failed(self, task_title: str, error: str):
+        """Called when time upload fails (will be retried automatically)."""
+        self.status_label.setText("时间同步失败，后台重试中...")
+        self.log_message(f"⚠ 时间同步失败，后台每2分钟自动重试：{task_title}")
+        self.logger.error(f"Time sync failed for '{task_title}': {error}")
+
+    def on_screenshots_failed(self, task_title: str):
+        """Called when screenshot upload fails (will be retried automatically)."""
+        self.status_label.setText("时间已同步 ✓，截图后台重试中...")
+        self.log_message(f"⚠ 截图上传失败，后台自动重试（时间已同步）：{task_title}")
     
     def log_message(self, message: str):
         """Add message to log"""
@@ -583,15 +556,24 @@ class MainWindow(QMainWindow):
         """Handle application close event"""
         if self.time_tracker.is_active():
             reply = QMessageBox.question(
-                self, "Confirm Exit",
-                "Time tracking is active. Are you sure you want to exit?",
+                self, "确认退出",
+                "计时正在进行中，确定要退出吗？\n（未完成的时间记录会保存到本地，下次启动后自动同步）",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-            
             if reply == QMessageBox.StandardButton.Yes:
                 self.stop_tracking()
-                event.accept()
             else:
                 event.ignore()
-        else:
-            event.accept() 
+                return
+
+        # Stop background uploader gracefully
+        if hasattr(self, 'background_uploader'):
+            self.background_uploader.stop()
+            self.background_uploader.wait(3000)
+
+        if self.upload_queue.has_pending():
+            QMessageBox.information(
+                self, "同步提示",
+                "还有未完成的同步任务，下次启动应用时会自动继续上传。"
+            )
+        event.accept() 

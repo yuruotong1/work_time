@@ -170,6 +170,54 @@ class NotionClient:
             return date_prop['date']['start'][:10]  # Return YYYY-MM-DD format
         return ""
     
+    def update_time_only(self, task_id: str, time_seconds: int) -> float:
+        """Update only the time field. Returns the new total minutes."""
+        response = _retry(lambda: self.client.pages.retrieve(page_id=task_id))
+        current_task = self._parse_task_page(response)
+        current_minutes = current_task.get("time_spent", 0) if current_task else 0
+        delta_minutes = round(time_seconds / 60, 2)
+        total_minutes = current_minutes + delta_minutes
+
+        time_column = self.column_mappings.get("time_spent", "时间")
+        _retry(lambda: self.client.pages.update(
+            page_id=task_id,
+            properties={time_column: {"number": total_minutes}}
+        ))
+        self.logger.info(
+            f"Time updated: task={task_id}, total={total_minutes:.2f}min (+{delta_minutes:.2f}min)"
+        )
+        return total_minutes
+
+    def append_screenshots(self, task_id: str, screenshot_paths: List[str]):
+        """Upload a collage of screenshots and append it to the task's files field."""
+        screenshot_column = self.column_mappings.get("screenshots", "截屏")
+
+        response = _retry(lambda: self.client.pages.retrieve(page_id=task_id))
+        screenshot_prop = response["properties"].get(screenshot_column, {})
+        existing_files = screenshot_prop.get("files", [])
+
+        uploaded = self.file_uploader.upload_screenshots(screenshot_paths)
+        if not uploaded:
+            return
+
+        all_files = existing_files.copy()
+        for path, file_id in uploaded:
+            all_files.append({
+                "type": "file_upload",
+                "file_upload": {"id": file_id},
+                "name": os.path.basename(path),
+            })
+
+        max_files = 20
+        if len(all_files) > max_files:
+            all_files = self._sort_files_by_time(all_files)[-max_files:]
+
+        _retry(lambda: self.client.pages.update(
+            page_id=task_id,
+            properties={screenshot_column: {"type": "files", "files": all_files}}
+        ))
+        self.logger.info(f"Screenshots appended: task={task_id}, total={len(all_files)} collages")
+
     def update_task_time(self, task_id: str, time_spent: int, screenshots: List[str]):
         """Update task with time spent and screenshot collage (with retry)"""
         try:
