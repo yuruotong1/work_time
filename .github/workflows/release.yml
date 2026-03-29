@@ -38,7 +38,6 @@ jobs:
           pyinstaller --name "WorkTimeTracker" `
             --onefile `
             --windowed `
-            --add-data "config.yaml;." `
             main.py
 
       - name: Determine tag name
@@ -64,8 +63,9 @@ jobs:
 
             ### 使用说明
             1. 下载 `WorkTimeTracker.exe`
-            2. 在同目录放置 `config.yaml`（配置 Notion Token 和数据库 ID）
-            3. 双击运行
+            2. 创建配置文件 `%USERPROFILE%\.work_time\config.yaml`（参考仓库中的 `config.yaml.example`）
+            3. 填入 Notion Token 和数据库 ID
+            4. 双击运行
           files: dist/WorkTimeTracker.exe
           draft: false
           prerelease: false
