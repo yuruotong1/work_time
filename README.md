@@ -1,148 +1,145 @@
-# Work Time Tracker — 远程团队工作时间管理工具
+# Work Time Tracker
 
-> 专为远程团队设计的桌面工作助手，以 Notion 作为统一的任务分配与时间管理中台，帮助团队成员高效记录工时、留存工作截图，让远程协作更透明、可量化。
+> A desktop companion for remote teams — track task time, capture screenshots automatically, and sync everything to Notion.
 
----
-
-## 它能解决什么问题？
-
-远程工作最大的挑战之一是**工时不透明**：任务分配靠口头确认，工作时长难以追踪，计费核算全凭记忆，团队协作效率低下。
-
-Work Time Tracker 通过与 Notion 打通，将每个人的任务执行情况——包括工作时长和工作截图——自动同步回 Notion 数据库，让项目负责人可以实时了解各成员的工作投入，辅助进行任务分配、工时统计和价值核算。
+**Language / 语言 / 言語:** [English](./README.md) | [中文](./README_CN.md) | [日本語](./README_JA.md)
 
 ---
 
-## 核心功能
+## What Problem Does It Solve?
 
-### 任务管理
-- 自动从 Notion 数据库拉取当前任务列表（支持"未开始"和"进行中"状态）
-- 任务信息展示：负责人、截止日期、已累计工时
-- 一键刷新任务列表
-
-### 时间追踪
-- 精准计时：选中任务后一键开始/停止
-- 时间自动累加：每次工作会话的时长叠加到 Notion 数据库中
-- 时间是核心数据，**优先同步，保障计费准确**
-
-### 自动截图
-- 工作期间每隔 5 分钟自动截图，记录真实工作状态
-- 多张截图自动拼合为一张网格图（2列）上传至 Notion，避免图片数量爆炸
-- Notion 中最多保留最近 20 张拼图（约 20 个工作 session），自动淘汰最旧的
-
-### 可靠的离线同步机制
-- **本地优先**：停止计时后立刻将数据写入本地 `pending_uploads.json`，断网、崩溃都不丢失
-- **时间与截图解耦**：时间先上传（影响计费）；截图失败不影响时间同步
-- **无限重试**：后台线程每 2 分钟自动重试，网络恢复后无需手动操作
-- **跨启动续传**：重新打开应用时自动检测并继续上传历史未完成记录
-- **实时状态提示**：界面明确显示"时间已同步 ✓"或"截图后台重试中"
+One of the biggest challenges in remote work is **lack of transparency around time investment**: tasks are assigned verbally, hours worked are hard to verify, and billing relies on memory. Work Time Tracker bridges this gap by automatically syncing each team member's task time and work screenshots back to a shared Notion database — giving managers real-time visibility into how time is being spent.
 
 ---
 
-## 适用场景
+## Core Features
 
-| 场景 | 说明 |
-|------|------|
-| 远程开发团队 | 按任务记录工时，辅助项目报价和结算 |
-| 设计/创意团队 | 截图留存工作过程，方便复盘和汇报 |
-| 外包接单者 | 自动生成工时记录，增加客户信任度 |
-| 小型创业公司 | 以 Notion 为中台统一分配任务、查看各成员投入 |
+### Task Management
+- Pulls your task list directly from a Notion database (filters "Not Started" and "In Progress" statuses)
+- Displays assignee, due date, and cumulative hours per task
+- One-click refresh
+
+### Time Tracking
+- Start / stop a timer per task with a single click
+- Time accumulates across multiple sessions — each session adds to the Notion total
+- **Time is synced first** — it's the data that drives billing and valuation
+
+### Automatic Screenshots
+- Takes a screenshot every 5 minutes while tracking
+- Merges all screenshots from a session into a single 2-column collage and uploads it to Notion — no image count explosion
+- Notion keeps the 20 most recent collages per task; older ones are trimmed automatically
+
+### Reliable Offline Sync
+- **Local-first**: on stop, session data is immediately written to `pending_uploads.json` — survives network failures and crashes
+- **Time and screenshots are decoupled**: if screenshot upload fails, time is still synced
+- **Infinite retry**: a background thread retries every 2 minutes until everything is uploaded
+- **Resumes on restart**: pending sessions from previous runs are automatically retried on next launch
+- **Live status**: the UI clearly shows `Time synced ✓` or `Screenshots retrying in background`
 
 ---
 
-## 快速开始
+## Use Cases
 
-### 方法一：直接下载 exe（推荐，Windows 用户）
+| Scenario | Benefit |
+|----------|---------|
+| Remote development teams | Track hours per task for accurate project billing |
+| Design / creative teams | Screenshot log provides a visual record of work for review |
+| Freelancers | Auto-generated time logs build client trust |
+| Small startups | Use Notion as a central hub for task assignment and time visibility |
 
-从 [Releases 页面](https://github.com/yuruotong1/work_time/releases) 下载最新的 `WorkTimeTracker.exe`，放到任意目录，配置好 `config.yaml` 后双击运行，无需安装 Python。
+---
 
-### 方法二：从源码运行
+## Quick Start
 
-**1. 安装依赖**
+### Option A — Download the exe (Windows, recommended)
+
+Download the latest `WorkTimeTracker.exe` from the [Releases page](https://github.com/yuruotong1/work_time/releases), place it in any folder alongside `config.yaml`, and double-click to run. No Python installation required.
+
+### Option B — Run from source
+
+**1. Install dependencies**
 ```bash
 pip install -r requirements.txt
 ```
 
-**2. 配置 Notion 凭证**
-
-在 `config.yaml` 中填写你的 Notion Integration Token 和数据库 ID：
+**2. Configure Notion credentials** in `config.yaml`:
 ```yaml
 notion:
   api: "secret_xxxxxxxxxxxxxxxxxxxx"
   database_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 database:
-  task_name: 任务名称
-  assignee: 负责人
-  status: 状态
-  time_spent: 工作时间（分钟）
-  screenshots: 截屏
-  due_date: 截止日期
+  task_name: Task Name
+  assignee: Assignee
+  status: Status
+  time_spent: Time Spent (minutes)
+  screenshots: Screenshots
+  due_date: Due Date
 ```
 
-**3. 启动应用**
+**3. Run**
 ```bash
 python main.py
 ```
 
 ---
 
-## Notion 数据库配置
+## Notion Database Setup
 
-需要在 Notion 中创建一个包含以下字段的数据库：
+Create a database with the following fields:
 
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| 任务名称 | Title | 任务标题 |
-| 负责人 | Select | 任务负责人 |
-| 状态 | Status | 未开始 / 进行中 / 已完成 |
-| 工作时间（分钟） | Number | 累计工时（分钟），自动更新 |
-| 截屏 | Files | 工作截图拼图，自动上传 |
-| 截止日期 | Date | 任务截止日期 |
+| Field | Type | Description |
+|-------|------|-------------|
+| Task Name | Title | Task title |
+| Assignee | Select | Team member responsible |
+| Status | Status | Not Started / In Progress / Done |
+| Time Spent (minutes) | Number | Cumulative minutes — auto-updated |
+| Screenshots | Files | Session collage — auto-uploaded |
+| Due Date | Date | Task deadline |
 
-> 字段名可在 `config.yaml` 的 `database` 节中自定义映射。
+> Field names are fully configurable via the `database` section in `config.yaml`.
 
-**Notion Integration 配置步骤：**
-1. 访问 https://www.notion.so/my-integrations 创建一个 Integration
-2. 复制 Token，填入 `config.yaml`
-3. 在你的数据库页面右上角 → 连接 → 选择刚创建的 Integration
-4. 复制数据库 URL 中的 ID（32位字符串），填入 `config.yaml`
+**Notion Integration setup:**
+1. Go to https://www.notion.so/my-integrations and create an Integration
+2. Copy the token into `config.yaml`
+3. In your Notion database → top-right menu → Connections → select your Integration
+4. Copy the 32-character database ID from the URL into `config.yaml`
 
 ---
 
-## 工作流示意
+## How It Works
 
 ```
-Notion 数据库（任务分配）
-        ↓  拉取任务列表
-Work Time Tracker（桌面端）
-        ↓  开始计时 + 自动截图
-        ↓  停止后立即存本地
-        ↓  后台自动同步（无限重试）
-Notion 数据库（工时 + 截图更新）
+Notion Database (task assignment)
+        ↓  fetch task list
+Work Time Tracker (desktop)
+        ↓  start timer + auto screenshot
+        ↓  stop → save locally immediately
+        ↓  background sync (infinite retry)
+Notion Database (time + screenshot updated)
         ↓
-项目负责人查看各成员工时投入
+Manager reviews each member's time investment
 ```
 
 ---
 
-## 本地数据文件
+## Local Data Files
 
-| 文件 | 说明 |
-|------|------|
-| `pending_uploads.json` | 待同步队列，记录所有未上传的工作会话 |
-| `screenshots/` | 本地截图目录，原始截图保存在此 |
-| `work_tracker.log` | 运行日志，包含所有同步状态和错误记录 |
+| File | Description |
+|------|-------------|
+| `pending_uploads.json` | Upload queue — sessions waiting to sync |
+| `screenshots/` | Raw screenshot files |
+| `work_tracker.log` | Full sync log with errors and retry status |
 
 ---
 
-## 打包为 Windows exe
+## Build Windows EXE
 
 ```powershell
-# Windows PowerShell
 .\pack_windows.ps1
 ```
 
-或使用 GitHub Actions 自动构建（推送 tag 触发）：
+Or trigger a GitHub Actions build by pushing a tag:
 ```bash
 git tag v1.x.x
 git push origin v1.x.x
@@ -150,10 +147,10 @@ git push origin v1.x.x
 
 ---
 
-## 技术栈
+## Tech Stack
 
 - **UI**: PyQt6
-- **后端**: Notion API (notion-client)
-- **截图**: Pillow (PIL)
-- **打包**: PyInstaller
+- **Backend**: Notion API (notion-client)
+- **Screenshots**: Pillow (PIL)
+- **Packaging**: PyInstaller
 - **CI/CD**: GitHub Actions
