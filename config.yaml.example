@@ -1,0 +1,12 @@
+notion:
+  api: "secret_xxxxxxxxxxxxxxxxxxxx"       # Notion Integration Token
+  database_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # 32-char database ID
+
+# Database column name mappings (match your Notion database field names exactly)
+database:
+  task_name: Task Name
+  assignee: Assignee
+  status: Status
+  time_spent: Time Spent (minutes)
+  screenshots: Screenshots
+  due_date: Due Date

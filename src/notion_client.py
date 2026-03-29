@@ -3,7 +3,6 @@ Notion API Client for Work Time Tracker
 """
 
 import os
-import sys
 import time
 from typing import List, Dict, Optional
 from notion_client import Client
@@ -33,20 +32,33 @@ def _retry(func, max_attempts=MAX_RETRY, base_delay=BASE_DELAY):
                 time.sleep(delay)
     raise last_exc
 
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        base_path = sys._MEIPASS
-    except AttributeError:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+def _find_config() -> str:
+    """
+    Locate config.yaml. Search order:
+      1. ~/.work_time/config.yaml  (recommended for all users)
+      2. ./config.yaml             (dev fallback when running from source)
+    """
+    home_config = os.path.join(os.path.expanduser("~"), ".work_time", "config.yaml")
+    if os.path.exists(home_config):
+        return home_config
+
+    local_config = os.path.join(os.path.abspath("."), "config.yaml")
+    if os.path.exists(local_config):
+        return local_config
+
+    raise FileNotFoundError(
+        "config.yaml not found.\n\n"
+        f"Please create it at:  {home_config}\n"
+        "You can copy config.yaml.example as a starting point.\n\n"
+        "Get your Notion Integration Token at: https://www.notion.so/my-integrations"
+    )
 
 class NotionClient:
     """Client for interacting with Notion API"""
     
     def __init__(self):
         """Initialize Notion client with credentials"""
-        with open(resource_path('config.yaml'), 'r', encoding='utf-8') as file:
+        with open(_find_config(), 'r', encoding='utf-8') as file:
             config = yaml.safe_load(file)
 
         self.token = config['notion']['api']
