@@ -55,7 +55,9 @@ Work Time Tracker 通过与 Notion 打通，将每个人的任务执行情况—
 
 ### 方法一：直接下载 exe（推荐，Windows 用户）
 
-从 [Releases 页面](https://github.com/yuruotong1/work_time/releases) 下载最新的 `WorkTimeTracker.exe`，放到任意目录，配置好 `config.yaml` 后双击运行，无需安装 Python。
+1. 从 [Releases 页面](https://github.com/yuruotong1/work_time/releases) 下载最新的 `WorkTimeTracker.exe`
+2. 创建配置文件（见下方[配置说明](#配置说明)）
+3. 双击运行，无需安装 Python
 
 ### 方法二：从源码运行
 
@@ -64,14 +66,47 @@ Work Time Tracker 通过与 Notion 打通，将每个人的任务执行情况—
 pip install -r requirements.txt
 ```
 
-**2. 配置 Notion 凭证**
+**2. 创建配置文件**（见下方[配置说明](#配置说明)）
 
-在 `config.yaml` 中填写你的 Notion Integration Token 和数据库 ID：
+**3. 启动应用**
+```bash
+python main.py
+```
+
+---
+
+## 配置说明
+
+程序按以下优先级查找 `config.yaml`：
+
+| 优先级 | 路径 | 适用场景 |
+|--------|------|----------|
+| 第一 | `~/.work_time/config.yaml` | 所有用户（exe 和源码均适用） |
+| 第二 | `./config.yaml` | 开发调试时备用 |
+
+### 第一步 — 创建配置目录和文件
+
+**Windows：**
+```
+mkdir %USERPROFILE%\.work_time
+copy config.yaml.example %USERPROFILE%\.work_time\config.yaml
+```
+然后用记事本编辑 `C:\Users\你的用户名\.work_time\config.yaml`。
+
+**macOS / Linux：**
+```bash
+mkdir -p ~/.work_time
+cp config.yaml.example ~/.work_time/config.yaml
+```
+
+### 第二步 — 填写 Notion 凭证
+
 ```yaml
 notion:
-  api: "secret_xxxxxxxxxxxxxxxxxxxx"
-  database_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  api: "secret_xxxxxxxxxxxxxxxxxxxx"          # Notion Integration Token
+  database_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # 数据库 ID（32位）
 
+# 必须与你的 Notion 数据库字段名完全一致
 database:
   task_name: 任务名称
   assignee: 负责人
@@ -81,10 +116,20 @@ database:
   due_date: 截止日期
 ```
 
-**3. 启动应用**
-```bash
-python main.py
-```
+### 第三步 — 获取 Notion 凭证
+
+**Integration Token：**
+1. 访问 https://www.notion.so/my-integrations
+2. 点击 **"新建集成"**，填写名称后提交
+3. 复制 **内部集成 Token**（以 `secret_` 开头）
+
+**数据库 ID：**
+1. 在浏览器中打开你的 Notion 数据库页面
+2. URL 格式为：`https://www.notion.so/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?v=...`
+3. 复制 `.so/` 和 `?v=` 之间的 32 位字符串，即为数据库 ID
+
+**将集成连接到数据库：**
+1. 打开 Notion 数据库页面 → 右上角 `...` 菜单 → **连接** → 选择你创建的集成
 
 ---
 
@@ -102,12 +147,6 @@ python main.py
 | 截止日期 | Date | 任务截止日期 |
 
 > 字段名可在 `config.yaml` 的 `database` 节中自定义映射。
-
-**Notion Integration 配置步骤：**
-1. 访问 https://www.notion.so/my-integrations 创建一个 Integration
-2. 复制 Token，填入 `config.yaml`
-3. 在你的数据库页面右上角 → 连接 → 选择刚创建的 Integration
-4. 复制数据库 URL 中的 ID（32位字符串），填入 `config.yaml`
 
 ---
 
@@ -131,6 +170,7 @@ Notion 数据库（工时 + 截图更新）
 
 | 文件 | 说明 |
 |------|------|
+| `~/.work_time/config.yaml` | 你的 Notion 凭证和字段映射配置 |
 | `pending_uploads.json` | 待同步队列，记录所有未上传的工作会话 |
 | `screenshots/` | 本地截图目录，原始截图保存在此 |
 | `work_tracker.log` | 运行日志，包含所有同步状态和错误记录 |

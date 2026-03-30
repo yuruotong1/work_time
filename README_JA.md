@@ -55,7 +55,9 @@ Work Time Tracker は Notion と連携し、各メンバーの作業時間とス
 
 ### 方法A — exeをダウンロード（Windows、推奨）
 
-[Releases ページ](https://github.com/yuruotong1/work_time/releases)から最新の `WorkTimeTracker.exe` をダウンロードし、`config.yaml` と同じフォルダに置いてダブルクリックするだけ。Python のインストール不要。
+1. [Releases ページ](https://github.com/yuruotong1/work_time/releases)から最新の `WorkTimeTracker.exe` をダウンロード
+2. 設定ファイルを作成（下記[設定方法](#設定方法)を参照）
+3. `WorkTimeTracker.exe` をダブルクリックして起動。Python のインストール不要
 
 ### 方法B — ソースから実行
 
@@ -64,12 +66,47 @@ Work Time Tracker は Notion と連携し、各メンバーの作業時間とス
 pip install -r requirements.txt
 ```
 
-**2. Notion の認証情報を設定** (`config.yaml`):
+**2. 設定ファイルを作成**（下記[設定方法](#設定方法)を参照）
+
+**3. 起動**
+```bash
+python main.py
+```
+
+---
+
+## 設定方法
+
+アプリは以下の順で `config.yaml` を探します：
+
+| 優先度 | パス | 推奨対象 |
+|--------|------|----------|
+| 1番目 | `~/.work_time/config.yaml` | 全ユーザー（exe・ソース共通） |
+| 2番目 | `./config.yaml` | 開発・デバッグ時のみ |
+
+### ステップ1 — 設定ディレクトリとファイルを作成
+
+**Windows：**
+```
+mkdir %USERPROFILE%\.work_time
+copy config.yaml.example %USERPROFILE%\.work_time\config.yaml
+```
+`C:\Users\<ユーザー名>\.work_time\config.yaml` をメモ帳等で編集してください。
+
+**macOS / Linux：**
+```bash
+mkdir -p ~/.work_time
+cp config.yaml.example ~/.work_time/config.yaml
+```
+
+### ステップ2 — Notion の認証情報を入力
+
 ```yaml
 notion:
-  api: "secret_xxxxxxxxxxxxxxxxxxxx"
-  database_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  api: "secret_xxxxxxxxxxxxxxxxxxxx"          # Notion Integration Token
+  database_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # データベース ID（32文字）
 
+# Notion データベースのフィールド名と完全一致させること
 database:
   task_name: タスク名
   assignee: 担当者
@@ -79,10 +116,20 @@ database:
   due_date: 期限
 ```
 
-**3. 起動**
-```bash
-python main.py
-```
+### ステップ3 — Notion の認証情報を取得
+
+**Integration Token：**
+1. https://www.notion.so/my-integrations にアクセス
+2. **「新しいインテグレーション」** をクリックして作成
+3. **インターナルインテグレーションシークレット**（`secret_` で始まる文字列）をコピー
+
+**データベース ID：**
+1. ブラウザで Notion のデータベースページを開く
+2. URL の形式：`https://www.notion.so/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?v=...`
+3. `.so/` と `?v=` の間にある32文字の文字列がデータベース ID
+
+**インテグレーションをデータベースに接続：**
+1. Notion データベースページ右上の `...` → **接続** → 作成したインテグレーションを選択
 
 ---
 
@@ -100,12 +147,6 @@ python main.py
 | 期限 | Date | タスクの締切日 |
 
 > フィールド名は `config.yaml` の `database` セクションで自由にマッピング可能です。
-
-**Notion Integration の設定手順：**
-1. https://www.notion.so/my-integrations にアクセスして Integration を作成
-2. トークンをコピーして `config.yaml` に貼り付け
-3. Notion のデータベースページ右上 → 接続 → 作成した Integration を選択
-4. データベース URL から32文字のデータベース ID をコピーして `config.yaml` に貼り付け
 
 ---
 
@@ -129,6 +170,7 @@ Notion データベース（工数 + スクリーンショット更新）
 
 | ファイル | 説明 |
 |---------|------|
+| `~/.work_time/config.yaml` | Notion 認証情報とフィールドマッピング設定 |
 | `pending_uploads.json` | 同期待ちキュー — 未アップロードセッションを記録 |
 | `screenshots/` | スクリーンショット保存ディレクトリ |
 | `work_tracker.log` | 同期ログ（エラー・リトライ状況を含む） |

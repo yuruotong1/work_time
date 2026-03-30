@@ -53,7 +53,9 @@ One of the biggest challenges in remote work is **lack of transparency around ti
 
 ### Option A — Download the exe (Windows, recommended)
 
-Download the latest `WorkTimeTracker.exe` from the [Releases page](https://github.com/yuruotong1/work_time/releases), place it in any folder alongside `config.yaml`, and double-click to run. No Python installation required.
+1. Download the latest `WorkTimeTracker.exe` from the [Releases page](https://github.com/yuruotong1/work_time/releases)
+2. Create the config file (see [Configuration](#configuration) below)
+3. Double-click `WorkTimeTracker.exe` to run — no Python installation required
 
 ### Option B — Run from source
 
@@ -62,12 +64,47 @@ Download the latest `WorkTimeTracker.exe` from the [Releases page](https://githu
 pip install -r requirements.txt
 ```
 
-**2. Configure Notion credentials** in `config.yaml`:
+**2. Create the config file** (see [Configuration](#configuration) below)
+
+**3. Run**
+```bash
+python main.py
+```
+
+---
+
+## Configuration
+
+The app reads `config.yaml` from the following locations (in order):
+
+| Priority | Path | Recommended for |
+|----------|------|-----------------|
+| 1st | `~/.work_time/config.yaml` | All users (exe & source) |
+| 2nd | `./config.yaml` | Development / running from source |
+
+### Step 1 — Create the config directory and file
+
+**Windows:**
+```
+mkdir %USERPROFILE%\.work_time
+copy config.yaml.example %USERPROFILE%\.work_time\config.yaml
+```
+Then edit `C:\Users\<YourName>\.work_time\config.yaml`.
+
+**macOS / Linux:**
+```bash
+mkdir -p ~/.work_time
+cp config.yaml.example ~/.work_time/config.yaml
+```
+
+### Step 2 — Fill in your Notion credentials
+
 ```yaml
 notion:
-  api: "secret_xxxxxxxxxxxxxxxxxxxx"
-  database_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  api: "secret_xxxxxxxxxxxxxxxxxxxx"       # Your Notion Integration Token
+  database_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # 32-char ID from your database URL
 
+# Must match your Notion database field names exactly
 database:
   task_name: Task Name
   assignee: Assignee
@@ -77,10 +114,20 @@ database:
   due_date: Due Date
 ```
 
-**3. Run**
-```bash
-python main.py
-```
+### Step 3 — Get your Notion credentials
+
+**Integration Token:**
+1. Go to https://www.notion.so/my-integrations
+2. Click **"New integration"**, give it a name, and click **Submit**
+3. Copy the **Internal Integration Token** (starts with `secret_`)
+
+**Database ID:**
+1. Open your Notion database page in a browser
+2. The URL looks like: `https://www.notion.so/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?v=...`
+3. Copy the 32-character string between `.so/` and `?v=` — that's your database ID
+
+**Connect the Integration to your database:**
+1. In your Notion database → top-right `...` menu → **Connections** → select your Integration
 
 ---
 
@@ -97,13 +144,7 @@ Create a database with the following fields:
 | Screenshots | Files | Session collage — auto-uploaded |
 | Due Date | Date | Task deadline |
 
-> Field names are fully configurable via the `database` section in `config.yaml`.
-
-**Notion Integration setup:**
-1. Go to https://www.notion.so/my-integrations and create an Integration
-2. Copy the token into `config.yaml`
-3. In your Notion database → top-right menu → Connections → select your Integration
-4. Copy the 32-character database ID from the URL into `config.yaml`
+> Field names are configurable via the `database` section in `config.yaml`.
 
 ---
 
@@ -127,6 +168,7 @@ Manager reviews each member's time investment
 
 | File | Description |
 |------|-------------|
+| `~/.work_time/config.yaml` | Your credentials and column mappings |
 | `pending_uploads.json` | Upload queue — sessions waiting to sync |
 | `screenshots/` | Raw screenshot files |
 | `work_tracker.log` | Full sync log with errors and retry status |
